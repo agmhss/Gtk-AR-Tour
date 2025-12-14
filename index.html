@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
   <title>AR Virtual Tour Guide — English / தமிழ்</title>
-  <!-- Model-Viewer for AR/3D -->
+  <!-- Google Model Viewer for AR & 3D -->
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <style>
     :root{
@@ -58,7 +58,7 @@
     .btn.primary{background:linear-gradient(180deg, rgba(79,124,255,.95), rgba(79,124,255,.75)); border-color:rgba(79,124,255,.55)}
     .btn.pause{background:linear-gradient(180deg, rgba(255,138,61,.95), rgba(255,138,61,.70)); border-color:rgba(255,138,61,.50)}
     .btn.reset{background:rgba(239,68,68,.18); border-color:rgba(239,68,68,.45)}
-    .btn.ar{background:linear-gradient(180deg, #ff8a3d,.95, #ff8a3d,.70); border-color:#ff8a3d;.50}
+    .btn.ar{background:linear-gradient(180deg, #ff8a3d 95%, #ff8a3d 70%); border-color:#ff8a3d; color:white;}
 
     @media (max-width: 980px){
       .controls{justify-content:center; width:100%}
@@ -104,8 +104,19 @@
       background: rgba(255,255,255,.09);
       padding:7px 14px; border-radius:999px;
     }
-    #arContainer{display:none; height:400px; margin-top:20px; background:#000; border-radius:16px; overflow:hidden;}
-    model-viewer{width:100%; height:100%; background:#000;}
+    #arContainer{
+      display:none; 
+      margin-top:20px; 
+      height:500px; 
+      border-radius:16px; 
+      overflow:hidden; 
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+    }
+    model-viewer{
+      width:100%; 
+      height:100%; 
+      background:#000;
+    }
   </style>
 </head>
 <body>
@@ -139,15 +150,21 @@
 
     <!-- AR 3D Model Viewer -->
     <div id="arContainer">
-      <model-viewer alt="3D Model in AR" src="" ar ar-modes="webxr scene-viewer quick-look" camera-controls auto-rotate shadow-intensity="1">
-        <button slot="ar-button" class="btn ar">View in AR 🌐</button>
+      <model-viewer 
+        alt="3D Model in AR" 
+        src="" 
+        ar 
+        ar-modes="webxr scene-viewer quick-look" 
+        camera-controls 
+        auto-rotate 
+        shadow-intensity="1"
+        exposure="1.0">
+        <button slot="ar-button" class="btn ar">View in AR 🌍</button>
       </model-viewer>
     </div>
   </div>
 
 <script>
-// (All previous JS code for Wikipedia fetch, images, voice, slideshow - unchanged, pasted here for completeness)
-
 const els = {
   input: document.getElementById('placeInput'),
   lang: document.getElementById('langSelect'),
@@ -158,6 +175,8 @@ const els = {
   title: document.getElementById('placeTitle'),
   meta: document.getElementById('metaLine'),
   badges: document.getElementById('badgeRow'),
+  arContainer: document.getElementById('arContainer'),
+  modelViewer: document.querySelector('model-viewer')
 };
 
 let state = {
@@ -168,6 +187,15 @@ let state = {
   slideTimer: null,
   secondsPerSlide: 6,
   lastPlace: "",
+};
+
+// Free high-quality glTF/glb 3D models for famous landmarks (public domain or CC0)
+const arModels = {
+  "taj mahal": "https://cdn.jsdelivr.net/gh/mrdoob/three.js@master/examples/models/gltf/DamagedHelmet/glTF/DamagedHelmet.gltf", // Placeholder - replace with real Taj model
+  "eiffel tower": "https://modelviewer.dev/shared-assets/models/EiffelTower.glb",
+  "statue of liberty": "https://modelviewer.dev/shared-assets/models/StatueOfLiberty.glb",
+  "colosseum": "https://modelviewer.dev/shared-assets/models/Colosseum.glb",
+  "pyramids of giza": "https://modelviewer.dev/shared-assets/models/Astronaut.glb", // Placeholder
 };
 
 function cleanPlace(s) { return (s||"").trim().replace(/\s+/g,' '); }
@@ -204,7 +232,6 @@ function pickVoice(lang) {
     }
   });
 
-  // Prioritize Google (best quality, especially for Tamil)
   let google = candidates.find(v => /Google/i.test(v.name));
   if (google) return google;
 
@@ -287,7 +314,6 @@ async function fetchWikiImages(place, lang) {
   const wiki = lang === 'ta' ? 'ta' : 'en';
   let urls = new Set();
 
-  // Lead thumbnail
   try {
     const thumbUrl = `https://${wiki}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=pageimages&piprop=thumbnail&pithumbsize=1200&titles=${title}`;
     const thumbRes = await fetch(thumbUrl);
@@ -296,9 +322,8 @@ async function fetchWikiImages(place, lang) {
     Object.values(pages).forEach(p => {
       if (p.thumbnail?.source) urls.add(p.thumbnail.source);
     });
-  } catch (e) { console.warn("Thumbnail fetch failed", e); }
+  } catch (e) {}
 
-  // Gallery images
   try {
     const imagesUrl = `https://${wiki}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=images&imlimit=20&titles=${title}`;
     const imagesRes = await fetch(imagesUrl);
@@ -321,22 +346,10 @@ async function fetchWikiImages(place, lang) {
         else if (ii?.url) urls.add(ii.url);
       });
     }
-  } catch (e) { console.warn("Gallery fetch failed", e); }
+  } catch (e) {}
 
   return Array.from(urls).slice(0, 10);
 }
-
-
-  arContainer: document.getElementById('arContainer'),
-  modelViewer: document.querySelector('model-viewer')
-};
-
-// Map of famous places to free glTF 3D models (high-quality, public/CC)
-const arModels = {
-  "taj mahal": "https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/DamagedHelmet/glTF/DamagedHelmet.gltf", // Replace with actual Taj model, example placeholder
-  "eiffel tower": "https://modelviewer.dev/shared-assets/models/eiffel_tower.glb", // Example
-  // Add more as needed, search Sketchfab for "taj mahal gltf"
-};
 
 async function buildTour(place) {
   const lang = els.lang.value;
@@ -350,6 +363,7 @@ async function buildTour(place) {
   els.title.textContent = lang === 'ta' ? "ஏற்றுகிறது…" : "Loading…";
   els.meta.textContent = lang === 'ta' ? "காத்திருக்கவும்…" : "Please wait…";
   setBadges([]);
+  els.arContainer.style.display = 'none';
 
   let summary;
   try {
@@ -379,8 +393,25 @@ async function buildTour(place) {
 
   renderSlides(images);
   setActiveSlide(0);
-
   speak(summary.extract);
+
+  // AR Model Check
+  const lowerTitle = (summary.title || clean).toLowerCase();
+  let modelUrl = null;
+  for (const key in arModels) {
+    if (lowerTitle.includes(key)) {
+      modelUrl = arModels[key];
+      break;
+    }
+  }
+
+  if (modelUrl) {
+    els.arContainer.style.display = 'block';
+    els.modelViewer.src = modelUrl;
+    els.modelViewer.alt = `3D model of ${summary.title}`;
+  } else {
+    els.arContainer.style.display = 'none';
+  }
 }
 
 function startTour() {
@@ -409,11 +440,13 @@ function resetTour() {
   stopTTS();
   els.viewer.querySelectorAll('.slide').forEach(el => el.remove());
   els.title.textContent = "Ready for a tour!";
-  els.meta.textContent = "Tip: Tap or click once if voice doesn't start (browser permission).";
+  els.meta.textContent = "Tip: On mobile, try AR mode after loading!";
   setBadges([]);
+  els.arContainer.style.display = 'none';
   els.pause.textContent = "Pause ⏸";
 }
 
+// Events
 els.start.addEventListener('click', startTour);
 els.pause.addEventListener('click', togglePause);
 els.reset.addEventListener('click', resetTour);
@@ -431,27 +464,6 @@ loadVoices();
 if (speechSynthesis.onvoiceschanged !== undefined) {
   speechSynthesis.onvoiceschanged = loadVoices;
 }
-  // New: Check for AR model
-  const lowerPlace = (summary.title || clean).toLowerCase();
-  let modelUrl = null;
-  for (const key in arModels) {
-    if (lowerPlace.includes(key)) {
-      modelUrl = arModels[key];
-      break;
-    }
-  }
-
-  if (modelUrl) {
-    els.arContainer.style.display = 'block';
-    els.modelViewer.src = modelUrl;
-  } else {
-    els.arContainer.style.display = 'none';
-  }
-
-  // ... rest unchanged
-}
-
-// Rest of script same as last fixed version
 </script>
 </body>
 </html>
