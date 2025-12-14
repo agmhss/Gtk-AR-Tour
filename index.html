@@ -148,8 +148,185 @@
 <script>
 // (All previous JS code for Wikipedia fetch, images, voice, slideshow - unchanged, pasted here for completeness)
 
-const els = { /* same as before */ 
-  // add:
+const els = {
+  input: document.getElementById('placeInput'),
+  lang: document.getElementById('langSelect'),
+  start: document.getElementById('startBtn'),
+  pause: document.getElementById('pauseBtn'),
+  reset: document.getElementById('resetBtn'),
+  viewer: document.getElementById('viewer'),
+  title: document.getElementById('placeTitle'),
+  meta: document.getElementById('metaLine'),
+  badges: document.getElementById('badgeRow'),
+};
+
+let state = {
+  running: false,
+  paused: false,
+  slides: [],
+  slideIndex: 0,
+  slideTimer: null,
+  secondsPerSlide: 6,
+  lastPlace: "",
+};
+
+function cleanPlace(s) { return (s||"").trim().replace(/\s+/g,' '); }
+
+function setBadges(items) {
+  els.badges.innerHTML = "";
+  (items||[]).slice(0,6).forEach(t => {
+    const b = document.createElement('div');
+    b.className = 'badge';
+    b.textContent = t;
+    els.badges.appendChild(b);
+  });
+}
+
+function stopSlideshow() {
+  if (state.slideTimer) { clearInterval(state.slideTimer); state.slideTimer = null; }
+}
+
+function stopTTS() {
+  try { speechSynthesis.cancel(); } catch(e) {}
+}
+
+function pickVoice(lang) {
+  const voices = speechSynthesis.getVoices();
+  if (voices.length === 0) return null;
+
+  const femaleKeywords = [/female/i, /woman/i, /girl/i, /lady/i, /aditi/i, /veena/i, /raveena/i, /samantha/i, /zira/i, /salli/i];
+
+  let candidates = voices.filter(v => {
+    if (lang === 'ta') {
+      return /^ta/i.test(v.lang) || /tamil/i.test(v.lang) || /tamil/i.test(v.name);
+    } else {
+      return /^en-IN/i.test(v.lang) || /^en.*india/i.test(v.lang) || /^en/i.test(v.lang);
+    }
+  });
+
+  // Prioritize Google (best quality, especially for Tamil)
+  let google = candidates.find(v => /Google/i.test(v.name));
+  if (google) return google;
+
+  let female = candidates.find(v => femaleKeywords.some(kw => kw.test(v.name)));
+  if (female) return female;
+
+  return candidates[0] || voices[0];
+}
+
+function speak(text) {
+  stopTTS();
+  if (!text?.trim()) return;
+  const utter = new SpeechSynthesisUtterance(text);
+  const voice = pickVoice(els.lang.value);
+  if (voice) utter.voice = voice;
+
+  utter.lang = els.lang.value === 'ta' ? 'ta-IN' : 'en-IN';
+  utter.rate = 0.95;
+  utter.pitch = 1.25;
+  utter.volume = 1.0;
+
+  speechSynthesis.speak(utter);
+}
+
+function loadVoices() {
+  speechSynthesis.getVoices();
+}
+
+function renderSlides(urls) {
+  els.viewer.querySelectorAll('.slide').forEach(el => el.remove());
+  state.slides = urls || [];
+  state.slideIndex = 0;
+
+  if (state.slides.length === 0) {
+    els.viewer.style.background = "#111";
+    return;
+  }
+
+  state.slides.forEach((url, i) => {
+    const img = new Image();
+    img.className = 'slide' + (i === 0 ? ' active' : '');
+    img.src = url;
+    img.alt = "Tour image";
+    els.viewer.insertBefore(img, els.viewer.firstChild);
+  });
+}
+
+function setActiveSlide(i) {
+  const slides = els.viewer.querySelectorAll('.slide');
+  slides.forEach((s, idx) => s.classList.toggle('active', idx === i));
+}
+
+function startSlideshow() {
+  stopSlideshow();
+  if (state.slides.length <= 1) return;
+
+  state.slideTimer = setInterval(() => {
+    if (!state.running || state.paused) return;
+    state.slideIndex = (state.slideIndex + 1) % state.slides.length;
+    setActiveSlide(state.slideIndex);
+  }, state.secondsPerSlide * 1000);
+}
+
+async function fetchWikiSummary(place, lang) {
+  const title = encodeURIComponent(place.replace(/ /g, '_'));
+  const wiki = lang === 'ta' ? 'ta' : 'en';
+  const url = `https://${wiki}.wikipedia.org/api/rest_v1/page/summary/${title}?origin=*`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("Summary not found");
+  const data = await res.json();
+  return {
+    title: data.title || place,
+    extract: data.extract || "",
+    pageUrl: data.content_urls?.desktop?.page || "",
+  };
+}
+
+async function fetchWikiImages(place, lang) {
+  const title = encodeURIComponent(place.replace(/ /g, '_'));
+  const wiki = lang === 'ta' ? 'ta' : 'en';
+  let urls = new Set();
+
+  // Lead thumbnail
+  try {
+    const thumbUrl = `https://${wiki}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=pageimages&piprop=thumbnail&pithumbsize=1200&titles=${title}`;
+    const thumbRes = await fetch(thumbUrl);
+    const thumbJson = await thumbRes.json();
+    const pages = thumbJson.query.pages || {};
+    Object.values(pages).forEach(p => {
+      if (p.thumbnail?.source) urls.add(p.thumbnail.source);
+    });
+  } catch (e) { console.warn("Thumbnail fetch failed", e); }
+
+  // Gallery images
+  try {
+    const imagesUrl = `https://${wiki}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=images&imlimit=20&titles=${title}`;
+    const imagesRes = await fetch(imagesUrl);
+    const imagesJson = await imagesRes.json();
+    const pageObj = Object.values(imagesJson.query.pages || {})[0] || {};
+    const imageTitles = (pageObj.images || [])
+      .map(img => img.title)
+      .filter(t => /\.(jpg|jpeg|png|svg|gif|webp)$/i.test(t))
+      .slice(0, 15)
+      .join('|');
+
+    if (imageTitles) {
+      const infoUrl = `https://${wiki}.wikipedia.org/w/api.php?action=query&format=json&origin=*&prop=imageinfo&iiprop=url&iiurlwidth=1200&titles=${encodeURIComponent(imageTitles)}`;
+      const infoRes = await fetch(infoUrl);
+      const infoJson = await infoRes.json();
+      const infoPages = infoJson.query.pages || {};
+      Object.values(infoPages).forEach(p => {
+        const ii = p.imageinfo?.[0];
+        if (ii?.thumburl) urls.add(ii.thumburl);
+        else if (ii?.url) urls.add(ii.url);
+      });
+    }
+  } catch (e) { console.warn("Gallery fetch failed", e); }
+
+  return Array.from(urls).slice(0, 10);
+}
+
+
   arContainer: document.getElementById('arContainer'),
   modelViewer: document.querySelector('model-viewer')
 };
@@ -162,8 +339,98 @@ const arModels = {
 };
 
 async function buildTour(place) {
-  // ... (all previous code for summary, images, narration)
+  const lang = els.lang.value;
+  const clean = cleanPlace(place);
+  if (!clean) {
+    alert(lang === 'ta' ? "இடப் பெயர் தேவை" : "Please enter a place name");
+    return;
+  }
 
+  state.lastPlace = clean;
+  els.title.textContent = lang === 'ta' ? "ஏற்றுகிறது…" : "Loading…";
+  els.meta.textContent = lang === 'ta' ? "காத்திருக்கவும்…" : "Please wait…";
+  setBadges([]);
+
+  let summary;
+  try {
+    summary = await fetchWikiSummary(clean, lang);
+  } catch (e) {
+    try {
+      summary = await fetchWikiSummary(clean, 'en');
+    } catch (e2) {
+      els.title.textContent = lang === 'ta' ? "பிழை" : "Error";
+      els.meta.textContent = lang === 'ta' ? "இடம் கிடைக்கவில்லை" : "Place not found";
+      return;
+    }
+  }
+
+  let images = [];
+  try { images = await fetchWikiImages(clean, lang); } catch (e) {}
+  if (images.length === 0 && lang !== 'en') {
+    try { images = await fetchWikiImages(clean, 'en'); } catch (e) {}
+  }
+
+  els.title.textContent = summary.title || clean;
+  els.meta.innerHTML = summary.pageUrl 
+    ? `<a style="color:#b6c7ff; border-bottom:1px dotted;" href="${summary.pageUrl}" target="_blank" rel="noopener">Source</a>`
+    : (lang === 'ta' ? "படங்களுடன் சுற்றுலா" : "Enjoy the tour");
+
+  setBadges(["History", "Culture", "Architecture"]);
+
+  renderSlides(images);
+  setActiveSlide(0);
+
+  speak(summary.extract);
+}
+
+function startTour() {
+  state.running = true;
+  state.paused = false;
+  els.pause.textContent = "Pause ⏸";
+  buildTour(els.input.value).then(() => startSlideshow());
+}
+
+function togglePause() {
+  if (!state.running) return;
+  state.paused = !state.paused;
+  els.pause.textContent = state.paused ? "Resume ▶︎" : "Pause ⏸";
+  if (state.paused) {
+    speechSynthesis.pause();
+  } else {
+    speechSynthesis.resume();
+    if (state.slides.length > 1) startSlideshow();
+  }
+}
+
+function resetTour() {
+  state.running = false;
+  state.paused = false;
+  stopSlideshow();
+  stopTTS();
+  els.viewer.querySelectorAll('.slide').forEach(el => el.remove());
+  els.title.textContent = "Ready for a tour!";
+  els.meta.textContent = "Tip: Tap or click once if voice doesn't start (browser permission).";
+  setBadges([]);
+  els.pause.textContent = "Pause ⏸";
+}
+
+els.start.addEventListener('click', startTour);
+els.pause.addEventListener('click', togglePause);
+els.reset.addEventListener('click', resetTour);
+els.input.addEventListener('keydown', e => { if (e.key === 'Enter') startTour(); });
+els.lang.addEventListener('change', () => {
+  if (state.running && state.lastPlace) {
+    els.input.value = state.lastPlace;
+    startTour();
+  }
+});
+
+document.addEventListener('click', () => {}, { once: true });
+
+loadVoices();
+if (speechSynthesis.onvoiceschanged !== undefined) {
+  speechSynthesis.onvoiceschanged = loadVoices;
+}
   // New: Check for AR model
   const lowerPlace = (summary.title || clean).toLowerCase();
   let modelUrl = null;
